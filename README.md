@@ -10,5 +10,4 @@ seabird_rat_transect_metadata.csv: Metadata for each benthic/fish transect, incl
 Contains the R Markdown files: 
 benthic_analysis.Rmd: Code for analyses and figures for benthos data
 fish_analysis.Rmd: Code for analyses and figures for fish data
-=======
 
