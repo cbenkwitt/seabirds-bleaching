@@ -1,0 +1,616 @@
+
+##Analyses and figures for Benkwitt, Wilson, & Graham "Seabird nutrient subsidies alter patterns of algal abundance and fish biomass on coral reefs following a bleaching event", Global Change Biology (In Review)
+
+##Benthos
+
+
+##load data
+```{r, include = FALSE}
+#load data
+benthic<-read.csv("seabird_rat_benthic_data_2015_2018.csv", header=TRUE)
+head(benthic)
+```
+
+
+##Sum percent of each category by transect
+```{r, include = FALSE}
+library(plyr)
+
+#aggregate by transect
+benthic_trans_group<-ddply(benthic, c("Year", "Island", "Transect", "Group"), summarise, 
+                      Percent=sum(Percent), 
+                      Proportion=sum(Proportion), 
+                      .drop = FALSE)
+benthic_trans_group
+levels(benthic_trans_group$Island)
+
+#drop islands not surveyed in 2018, since these values are actually NA's, not 0's
+benthic_trans_group<-benthic_trans_group[!(benthic_trans_group$Year=="2018" & benthic_trans_group$Island=="Eagle") ,]
+benthic_trans_group<-benthic_trans_group[!(benthic_trans_group$Year=="2018" & benthic_trans_group$Island=="Nelson_Island") ,]
+nrow(benthic_trans_group)
+benthic_trans_group
+```
+
+
+##Merge data with metadata
+```{r, include = FALSE}
+#load transect metadata to merge
+uvc_meta <- read.csv("seabird_rat_transect_metadata.csv", header=TRUE)
+head(uvc_meta)
+
+##merge dataframes so have transect metadata with benthic data
+benthic_trans_group_meta<-merge(uvc_meta, benthic_trans_group, c("Year", "Island", "Transect"))
+benthic_trans_group_meta
+```
+
+
+##NMDS
+```{r}
+library(reshape2)
+library(vegan)
+
+#Aggregate to island-level
+benthic_island_group <-ddply(benthic_trans_group_meta, c("Year","Treatment", "Atoll", "Island", "Group"), summarise,
+          Mean_Proportion = mean(Proportion), 
+          sd = sd(Proportion),
+          n = length(Proportion),
+          se = sd(Proportion)/sqrt(n))
+benthic_island_group
+
+#Change year to factor
+benthic_island_group$Year<-as.factor(benthic_island_group$Year)
+
+#Add column for combined treatment and year (to make some comparisons and plotting easier)
+benthic_island_group$Treat_Year<-paste(benthic_island_group$Treatment, benthic_island_group$Year, sep = '_')
+#change to factor
+benthic_island_group$Treat_Year<-as.factor(benthic_island_group$Treat_Year)
+
+
+#convert to wide for NMDS
+benthic_island_wide <- dcast(benthic_island_group, Year + Atoll + Island + Treatment + Treat_Year ~ Group, value.var="Mean_Proportion")
+benthic_island_wide
+
+#run NMDS
+nmds_benth<-metaMDS(benthic_island_wide[6:ncol(benthic_island_wide)], distance = "bray", trymax=200, k=2)
+nmds_benth
+scores(nmds_benth, display="species")
+#stress = 0.11 (good)
+
+#look at plot and centroids
+plot(nmds_benth)
+ord.fit<-envfit(nmds_benth~Treat_Year, data = benthic_island_wide)
+ord.fit
+plot(ord.fit)
+#draw polygons
+ordihull(nmds_benth, benthic_island_wide$Treat_Year, pty=3)
+#looks like some differences among groups, now run statistics
+
+#PERMANOVA
+#anosim more influenced by dispersion, so use adonis
+
+#set blocks by atoll
+perm <- how(nperm = 999)
+setBlocks(perm) <- with(benthic_island_wide, Atoll)
+
+#run analysis
+benthic_ad<-adonis2(benthic_island_wide[6:ncol(benthic_island_wide)] ~ Treatment*Year, data = benthic_island_wide, permutations = perm)
+benthic_ad
+#interaction significant
+#treatment and year both significant
+#(note: permutation test, so slightly different p-values each time)
+
+
+#test dispersion using PERMDISP
+benthic_disp <- betadisper(vegdist(benthic_island_wide[6:ncol(benthic_island_wide)], method = "bray"), benthic_island_wide$Treat_Year)
+benthic_disp
+
+#test for overall differences
+anova(benthic_disp)
+
+## Permutation test for pairwise comparisons
+permutest(benthic_disp, pairwise = TRUE)
+#(note: permutation test, so slightly different p-values each time)
+
+
+#extract mean dispersion values (distance to centroid), along with se's and 95% CI
+mod_benth.mean<-tapply(benthic_disp$distances, benthic_island_wide$Treat_Year, mean)
+mod_benth.mean
+mod_benth.sd<-tapply(benthic_disp$distances, benthic_island_wide$Treat_Year, sd)
+mod_benth.length<-tapply(benthic_disp$distances, benthic_island_wide$Treat_Year, length)
+mod_benth.se<-mod_benth.sd/sqrt(mod_benth.length)
+mod_benth.se
+mod_benth.ci_low<-mod_benth.mean-(1.96*mod_benth.se)
+mod_benth.ci_high<-mod_benth.mean+(1.96*mod_benth.se)
+#combine into a dataframe
+mod_benth.out<-as.data.frame(cbind(mod_benth.mean,mod_benth.se, mod_benth.ci_low, mod_benth.ci_high ))
+mod_benth.out<-cbind(Treat_Year = rownames(mod_benth.out), mod_benth.out)
+mod_benth.out
+
+
+##SIMPER analysis to test effects of species
+sim_benth<-simper(benthic_island_wide[6:ncol(benthic_island_wide)], benthic_island_wide$Treat_Year, permutations = 999)
+summary(sim_benth)
+
+```
+
+##Extract NMDS results and plot
+```{r}
+library(ggplot2)
+
+##Extract site and nmds_spp
+spp.sc <- scores(nmds_benth, display = "species", shrink = FALSE) 
+spp.sc
+site.sc <- scores(nmds_benth, display = "sites", shrink = FALSE) 
+site.sc
+
+#merge site.sc with metadata from dataframe
+benth_island_nmds<-cbind(site.sc, benthic_island_wide[1:5])
+benth_island_nmds
+
+#extract species scores
+species.scores <- as.data.frame(scores(nmds_benth, "species"))  #Using the scores function from vegan to extract the species scores and convert to a data.frame
+species.scores$species <- rownames(species.scores)  # create a column of species, from the rownames of species.scores
+head(species.scores)  #look at the data
+
+
+#get convex hulls for polygons
+hull_nr2015<-benth_island_nmds[benth_island_nmds$Treat_Year == "No_rats_2015", ][chull(benth_island_nmds[benth_island_nmds$Treat_Year == "No_rats_2015", ]$NMDS1, benth_island_nmds[benth_island_nmds$Treat_Year == "No_rats_2015", ]$NMDS2), ] 
+hull_nr2018<-benth_island_nmds[benth_island_nmds$Treat_Year == "No_rats_2018", ][chull(benth_island_nmds[benth_island_nmds$Treat_Year == "No_rats_2018", ]$NMDS1, benth_island_nmds[benth_island_nmds$Treat_Year == "No_rats_2018", ]$NMDS2), ] 
+hull_r2018<-benth_island_nmds[benth_island_nmds$Treat_Year == "Rats_2018", ][chull(benth_island_nmds[benth_island_nmds$Treat_Year == "Rats_2018", ]$NMDS1, benth_island_nmds[benth_island_nmds$Treat_Year == "Rats_2018", ]$NMDS2), ] 
+hull_r2015<-benth_island_nmds[benth_island_nmds$Treat_Year == "Rats_2015", ][chull(benth_island_nmds[benth_island_nmds$Treat_Year == "Rats_2015", ]$NMDS1, benth_island_nmds[benth_island_nmds$Treat_Year == "Rats_2015", ]$NMDS2), ] 
+hull.data <- rbind(hull_nr2015, hull_nr2018, hull_r2018, hull_r2015)  #combine grp.a and grp.b
+hull.data
+
+#get centroids to plot arrows
+ord.fit<-envfit(nmds_benth~Treat_Year, data = benthic_island_wide)
+ord.fit
+
+
+nmds_b<-
+ggplot() + 
+ geom_polygon(data=hull.data[hull.data$Treatment=="Rats",],aes(x=NMDS1,y=NMDS2,fill=Treatment,group=Treat_Year),colour = 'black', alpha = 0.15) + # add the convex hulls - two steps because the blue is fainter - alpha=0.15, 
+   geom_polygon(data=hull.data[hull.data$Treatment=="No_rats",],aes(x=NMDS1,y=NMDS2,fill=Treatment,group=Treat_Year), colour = 'black', alpha = 0.2) + # add the convex hulls - two steps because the blue is fainter - alpha=0.2,
+  geom_text(data=species.scores,aes(x=NMDS1,y=NMDS2,label=species)) +  # add the species labels - 
+  geom_point(data=benth_island_nmds,aes(x=NMDS1,y=NMDS2,shape=Year,colour=Treatment, fill = Treatment), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                           labels=c("Seabirds", "Rats") ) +
+    geom_segment(aes(x = 0.2073, y = -0.0475, xend = 0.1407, yend = -0.1338), colour = "#e41a1c", size = 1.2, arrow =   arrow(length = unit(0.1, "inches")))+ #rats - from ord.fit
+  geom_segment(aes(x = 0.1593, y = 0.0552, xend = -0.5806, yend = 0.1245), colour = "#56B4E9", size = 1.2, arrow =   arrow(length = unit(0.2, "inches")))+ #norats - from ord.fit
+  #coord_equal() +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none")
+        #legend.title = element_blank()) #remove legend title
+        #legend.box.background = element_rect(colour = "black", fill='white', linetype='solid', size=1), 
+       # legend.justification=c(1,.9), legend.position=c(1,.9))  #  fix legend
+      
+nmds_b
+
+
+##Make a plot of dispersion means +/- SE
+mod.out #from betadisper, above
+#create new columns for Treament and year
+mod.out$Treatment<-c("No_rats","No_rats","Rats", "Rats")
+mod.out$Year<-c("2015","2018","2015", "2018")
+mod.out
+
+bend<-ggplot(mod.out, aes(x=Year, y=mod_benth.mean, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(mod_benth.mean-mod_benth.se), ymax=(mod_benth.mean+mod_benth.se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("(a) Benthos") +
+  theme_bw() + 
+    theme(#axis.text.y = element_blank(), #remove y-axis labels
+  panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        scale_y_continuous(name = "Dispersion", limits = c(0,0.4), breaks=seq(0,0.4,0.1)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching"))  
+
+bend
+
+```
+
+
+#LMMs for individual groups
+```{r}
+library(lme4) #glmms
+
+#look at data
+benthic_trans_group_meta
+
+#change year to factor
+benthic_trans_group_meta$Year<-as.factor(benthic_trans_group_meta$Year)
+
+#run final models, log-transformed when necessary to meet assumptions
+#hard coral
+coral_lmer_1_int<-lmer(Percent~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
+summary(coral_lmer_1_int)
+
+coral_lmer_1_add<-lmer(Percent~Treatment+Year + (1|Atoll/Island),  data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
+summary(coral_lmer_1_add)
+
+#LRT
+anova(coral_lmer_1_int, coral_lmer_1_add)
+#no sig interaction
+
+#test for significance of each fixed effect with LRT's
+coral_lmer_1_yr<-lmer(Percent~Treatment + (1|Atoll/Island),  data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
+coral_lmer_1_treat<-lmer(Percent~Year + (1|Atoll/Island),  data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
+
+anova(coral_lmer_1_add, coral_lmer_1_yr)
+#very significant effect of year
+
+anova(coral_lmer_1_add, coral_lmer_1_treat)
+#no significant effect of treatment
+
+#extract effect size and 95% CI
+summary(coral_lmer_1_add)
+confint(coral_lmer_1_add, method = "Wald")
+
+
+#Halimeda
+algae_lmer_int<-lmer(log(Percent + 1)~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
+summary(algae_lmer_int)
+
+algae_lmer_add<-lmer(log(Percent + 1)~Treatment+Year + (1|Atoll/Island),data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
+summary(algae_lmer_add)
+
+anova(algae_lmer_int, algae_lmer_add)
+#very significant interaction
+
+#extract effects and back-transform to original scale
+algae_lmer_int<-lmer(log(Percent + 1)~relevel(Treatment, "Rats")*relevel(Year, "2018") + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
+summary(algae_lmer_int)
+confint(algae_lmer_int, method = "Wald")
+exp(fixef(algae_lmer_int)) #back to original scale (multiplicative change)
+exp(confint(algae_lmer_int, method = "Wald"))#back to original scale (multiplicative change)
+
+
+#CCA
+cca_lmer_int<-lmer(log(Percent + 1)~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
+summary(cca_lmer_int)
+
+cca_lmer_add<-lmer(log(Percent + 1)~Treatment+Year + (1|Atoll/Island),  data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
+summary(cca_lmer_add)
+
+anova(cca_lmer_int, cca_lmer_add)
+#interaction significant
+
+#extract effects and back-transform
+cca_lmer_int<-lmer(log(Percent + 1)~relevel(Treatment, "No_rats")*relevel(Year, "2018") + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
+summary(cca_lmer_int)
+confint(cca_lmer_int, method = "Wald")
+exp(fixef(cca_lmer_int)) #back to original scale (multiplicative change)
+exp(confint(cca_lmer_int, method = "Wald"))#back to original scale (multiplicative change)
+
+
+#Pavement
+pave_lmer_int<-lmer(Percent~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
+summary(pave_lmer_int)
+
+pave_lmer_add<-lmer(Percent~Treatment+Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
+summary(pave_lmer_add)
+
+anova(pave_lmer_int, pave_lmer_add)
+#very significant year*treatment interaction
+
+#extract effects
+pave_lmer_int<-lmer(Percent~relevel(Treatment, "Rats")*relevel(Year, "2018") + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
+
+summary(pave_lmer_int)
+confint(pave_lmer_int, method = "Wald")#year
+
+
+#Rubble
+rub_lmer_int<-lmer(log(Percent + 1)~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+summary(rub_lmer_int)
+
+rub_lmer_add<-lmer(log(Percent + 1)~Treatment+Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+summary(rub_lmer_add)
+
+anova(rub_lmer_int, rub_lmer_add)
+#no significant interaction
+
+rub_lmer_yr<-lmer(log(Percent + 1)~Treatment + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+
+rub_lmer_treat<-lmer(log(Percent + 1)~Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+
+
+anova(rub_lmer_add, rub_lmer_yr)
+anova(rub_lmer_add, rub_lmer_treat)
+#neither year nor treatment significant
+
+#extract effects
+summary(rub_lmer_add)
+confint(rub_lmer_add, method = "Wald")
+exp(fixef(rub_lmer_add)) #back to original scale (multiplicative change)
+exp(confint(rub_lmer_add, method = "Wald"))#back to original scale (multiplicative change)
+
+```
+
+
+##LMM for structural complexity
+```{r}
+
+#check meta-data
+uvc_meta
+#make year a factor
+uvc_meta$Year<-as.factor(uvc_meta$Year)
+
+#look at summarized data
+structure_treat <-ddply(uvc_meta, c("Year","Treatment"), summarise,
+          Mean_Structure = mean(Structure), 
+          sd = sd(Structure),
+          n = length(Structure),
+          se = sd(Structure)/sqrt(n))
+
+structure_treat
+#looks similar across groups
+
+#Run a model
+sc_lmer_int<-lmer(Structure~Treatment*Year + (1|Atoll/Island), data = uvc_meta)
+summary(sc_lmer_int)
+
+sc_lmer_add<-lmer(Structure~Treatment+Year + (1|Atoll/Island), data = uvc_meta)
+summary(sc_lmer_add)
+
+anova(sc_lmer_int, sc_lmer_add)
+#no significant interaction
+
+sc_lmer_treat<-lmer(Structure~Year + (1|Atoll/Island), data = uvc_meta)
+sc_lmer_yr<-lmer(Structure~Treatment + (1|Atoll/Island), data = uvc_meta)
+
+anova(sc_lmer_add, sc_lmer_treat)
+anova(sc_lmer_add, sc_lmer_yr)
+#neither year nor treatment significant
+
+
+#extract effects
+sc_lmer_int<-lmer(Structure~relevel(Treatment, "No_rats")*relevel(Year, "2018") + (1|Atoll/Island), data = uvc_meta)
+summary(sc_lmer_int)
+confint(sc_lmer_int, method = "Wald")
+```
+
+
+##Plots of individual benthic groups
+```{r, echo = FALSE}
+library(ggplot2)
+library('gridExtra') 
+
+#get means and se's
+benthic_group_treat <-ddply(benthic_trans_group_meta, c("Year","Treatment", "Group"), summarise,
+          Mean_Percent = mean(Percent), 
+          se = sd(Percent)/sqrt(length(Percent)))
+benthic_group_treat
+benthic_group_treat$Year<-as.factor(benthic_group_treat$Year)
+
+
+###plot each FG seperately, then mix together
+a<-ggplot(benthic_group_treat[benthic_group_treat$Group=="Hard_Coral",], aes(x=Year, y=Mean_Percent, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Percent-se), ymax=(Mean_Percent+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+   scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("(a) Hard coral") +
+  theme_bw() + 
+   theme( #axis.text.y = element_blank(), #remove y-axis labels
+panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position = "none") + 
+        scale_y_continuous(name = "Percent cover", limits = c(0,35), breaks=seq(0,30,10)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching"))  
+
+b<-ggplot(benthic_group_treat[benthic_group_treat$Group=="CCA",], aes(x=Year, y=Mean_Percent, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Percent-se), ymax=(Mean_Percent+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("(b) CCA") +
+  theme_bw() + 
+    theme( #axis.text.y = element_blank(), #remove y-axis labels
+panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        #legend.title = element_blank(), #remove legend title
+        #legend.box.background = element_rect(colour = "black", fill='white', linetype='solid', size=1), 
+       # legend.justification=c(1,.9), legend.position=c(1,.9)) + #  fix legend
+        scale_y_continuous(name = "Percent cover", limits = c(0,35), breaks=seq(0,30,10)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching"))  
+
+
+c<-ggplot(benthic_group_treat[benthic_group_treat$Group=="Halimeda",], aes(x=Year, y=Mean_Percent, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Percent-se), ymax=(Mean_Percent+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("(c) Halimeda") +
+  theme_bw() + 
+    theme(#axis.text.y = element_blank(), #remove y-axis labels
+  panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        scale_y_continuous(name = "Percent cover", limits = c(0,35), breaks=seq(0,30,10)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching"))  
+        
+
+
+d<-ggplot(benthic_group_treat[benthic_group_treat$Group=="Pavement",], aes(x=Year, y=Mean_Percent, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Percent-se), ymax=(Mean_Percent+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                           labels=c("Seabirds", "Rats") ) +
+  ggtitle("(d) Pavement") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+  panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        scale_y_continuous(name = "Percent cover", limits = c(0,56), breaks=seq(0,55,10)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching")) 
+
+e<-ggplot(benthic_group_treat[benthic_group_treat$Group=="Rubble",], aes(x=Year, y=Mean_Percent, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Percent-se), ymax=(Mean_Percent+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                           labels=c("Seabirds", "Rats") ) +
+  ggtitle("(e) Rubble") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+          panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        scale_y_continuous(name = "Percent cover", limits = c(0,15), breaks=seq(0,15,5)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching")) 
+
+#now plot structural complexity
+structure_treat
+
+f<-ggplot(structure_treat, aes(x=Year, y=Mean_Structure, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Structure-se), ymax=(Mean_Structure+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                           labels=c("Seabirds", "Rats") ) +
+  ggtitle("(f) Structural complexity") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+          panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        scale_y_continuous(name = "Rugosity index", limits = c(1,6), breaks=seq(1,6,1)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching")) 
+f
+
+#show plots
+grid.arrange(a, b,c,d,e,f, nrow = 3) 
+
+#export
+g <- arrangeGrob(a, b,c,d,e,f, nrow = 3) #generates g
+#ggsave("filename.eps", g, units="mm", width=180, height=270, dpi=1200)
+
+```
+
+#Look at hard coral by genus
+```{r}
+
+#make new data_frame with only hard coral
+head(benthic)
+coral_only<-benthic[benthic$Group=="Hard_Coral",]
+head(coral_only)
+#drop levels
+coral_only$Species<-factor(coral_only$Species)
+levels(coral_only$Species)
+
+#sum each genus by transect
+coral_sp_trans <-ddply(coral_only, c("Year","Island", "Transect", "Species"), summarise,
+          Sum_Percent = sum(Percent), 
+          .drop=FALSE)
+coral_sp_trans
+
+#merge with meta-data
+coral_sp_trans_meta<-merge(uvc_meta, coral_sp_trans, c("Year", "Island", "Transect"))
+
+#look at means by treatment and year
+coral_sp_treat <-ddply(coral_sp_trans_meta, c("Year","Treatment", "Species"), summarise,
+          Mean_Percent = mean(Sum_Percent), 
+          sd = sd(Sum_Percent),
+          n = length(Sum_Percent),
+          se = sd(Sum_Percent)/sqrt(n),
+          .drop=FALSE)
+coral_sp_treat
+
+#look at means by year
+coral_sp_year <-ddply(coral_sp_trans_meta, c("Year","Species"), summarise,
+          Mean_Prop = mean(Sum_Percent), 
+          sd = sd(Sum_Percent),
+          n = length(Sum_Percent),
+          se = sd(Sum_Percent)/sqrt(n),
+          .drop=FALSE)
+coral_sp_year
+#Acropora is dominant, and similar between birdy and ratty islands within years
+
+#run stats on Acropra declines
+acrop_int<-lmer(Sum_Percent~Treatment*Year + (1|Atoll/Island), data = coral_sp_trans_meta[coral_sp_trans_meta$Species=="Acropora",])
+summary(acrop_int)
+
+acrop_add<-lmer(Sum_Percent~Treatment+Year + (1|Atoll/Island), data = coral_sp_trans_meta[coral_sp_trans_meta$Species=="Acropora",])
+
+anova(acrop_int, acrop_add)
+#no sig interaction
+
+acrop_treat<-lmer(Sum_Percent~Year + (1|Atoll/Island), data = coral_sp_trans_meta[coral_sp_trans_meta$Species=="Acropora",])
+
+acrop_year<-lmer(Sum_Percent~Treatment + (1|Atoll/Island), data = coral_sp_trans_meta[coral_sp_trans_meta$Species=="Acropora",])
+
+anova(acrop_add, acrop_treat)
+#no sig effect of treatment
+
+anova(acrop_add, acrop_year)
+#very sig effect of year
+
+#extract effects
+summary(acrop_add)
+confint(acrop_add, method = "Wald")
+```

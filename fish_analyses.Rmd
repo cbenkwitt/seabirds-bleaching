@@ -1,0 +1,564 @@
+
+##Analyses and figures for Benkwitt, Wilson, & Graham "Seabird nutrient subsidies alter patterns of algal abundance and fish biomass on coral reefs following a bleaching event", Global Change Biology (In Review)
+
+##Fish
+
+#load data
+```{r,  include = FALSE}
+uvc_fish <- read.csv("seabird_rat_fish_data_2015_2018.csv", header=TRUE)
+head(uvc_fish)
+```
+
+
+#merge uvc data with metadata
+```{r,  include = FALSE}
+#load transect metadata to merge
+uvc_meta <- read.csv("seabird_rat_transect_metadata.csv", header=TRUE)
+head(uvc_meta)
+
+##merge dataframes so have transect metadata with benthic data
+fish_fg_trans_meta<-merge(uvc_meta, uvc_fish, c("Year", "Island", "Transect"))
+fish_fg_trans_meta
+
+```
+
+
+#NMDS
+```{r}
+library(reshape2)
+library(vegan)
+
+#Aggregate to island-level
+fish_fg_island <-ddply(fish_fg_trans_meta, c("Year","Treatment", "Atoll", "Island", "Function"), summarise,
+          Mean_Abundance = mean(Sum_Abundance), 
+          Mean_Biomass = mean(Sum_Biomass))
+fish_fg_island
+fish_fg_island$Year<-as.factor(fish_fg_island$Year)
+
+#add column for combined treatment and year
+fish_fg_island$Treat_Year<-paste(fish_fg_island$Treatment, fish_fg_island$Year, sep = '_')
+#change character to factor
+fish_fg_island$Treat_Year<-as.factor(fish_fg_island$Treat_Year)
+
+
+#convert to wide
+fish_fg_island_wide <- dcast(fish_fg_island, Year + Atoll + Island + Treatment + Treat_Year ~ Function, value.var="Mean_Abundance")
+fish_fg_island_wide
+
+#log data
+log_fish_fg<-log(fish_fg_island_wide[6:ncol(fish_fg_island_wide)]+1)
+
+
+###RUN NMDS
+nmds_fish_fg<-metaMDS(log_fish_fg, distance = "bray", trymax=200, k=2)
+nmds_fish_fg
+#stress = 0.07028299 - ok
+plot(nmds_fish_fg)
+scores(nmds_fish_fg, display="species")
+
+#look at plot and centroids
+plot(nmds_fish_fg)
+ord.fit<-envfit(nmds_fish_fg~Treat_Year, data = fish_fg_island_wide)
+ord.fit
+plot(ord.fit)
+#draw polygons
+ordihull(nmds_fish_fg, fish_fg_island_wide$Treat_Year, pty=3)
+#looks like some differences among groups, now run statistics
+
+
+#PERMANOVA
+#anosim more influenced by dispersion, so use adonis
+
+#set blocks by atoll
+perm_fish <- how(nperm = 999)
+setBlocks(perm_fish) <- with(fish_fg_island_wide, Atoll)
+
+#run analysis
+ad_fish<-adonis2(log_fish_fg ~ Treatment*Year, data = fish_fg_island_wide, permutations = perm_fish)
+ad_fish
+#no significant interaction, but year significant
+
+#drop interaction and run additive model to test main effects
+ad_fish1<-adonis2(log_fish_fg ~ Treatment+Year, data = fish_fg_island_wide, permutations = perm_fish)
+ad_fish1
+
+
+#test dispersion using PERMDISP
+mod_fish <- betadisper(vegdist(log_fish_fg, method = "bray"), fish_fg_island_wide$Treat_Year)
+mod_fish
+
+
+#test for overall differences
+anova(mod_fish)
+
+## Permutation test for pairwise comparisons
+permutest(mod_fish, pairwise = TRUE)
+
+
+#extract mean dispersion values (distance to centroid), along with se's and 95% CI
+mod_fish.mean<-tapply(mod_fish$distances, fish_fg_island_wide$Treat_Year, mean)
+mod_fish.mean
+mod_fish.sd<-tapply(mod_fish$distances, fish_fg_island_wide$Treat_Year, sd)
+mod_fish.length<-tapply(mod_fish$distances, fish_fg_island_wide$Treat_Year, length)
+mod_fish.se<-mod_fish.sd/sqrt(mod_fish.length)
+mod_fish.se
+mod_fish.ci_low<-mod_fish.mean-(1.96*mod_fish.se)
+mod_fish.ci_high<-mod_fish.mean+(1.96*mod_fish.se)
+#combine into a dataframe
+mod_fish.out<-as.data.frame(cbind(mod_fish.mean,mod_fish.se, mod_fish.ci_low, mod_fish.ci_high ))
+mod_fish.out<-cbind(Treat_Year = rownames(mod_fish.out), mod_fish.out)
+mod_fish.out
+
+
+##SIMPER analysis to test effects of species
+sim<-simper(log_fish_fg, fish_fg_island_wide$Year, permutations = 999)
+summary(sim)
+
+```
+
+##Extract NMDS results and plot
+```{r}
+library(ggplot2)
+library('gridExtra') 
+
+##Extract site and nmds_fg
+fg.sc <- scores(nmds_fish_fg, display = "species", shrink = FALSE) 
+fg.sc
+site.sc <- scores(nmds_fish_fg, display = "sites", shrink = FALSE) 
+site.sc
+#merge site.sc with metadata from dataframe
+fish_island_nmds<-cbind(site.sc, fish_fg_island_wide[1:5])
+
+
+
+#extract species scores
+species.scores.fish <- as.data.frame(scores(nmds_fish_fg, "species"))  #Using the scores function from vegan to extract the species scores and convert to a data.frame
+species.scores.fish$species <- rownames(species.scores.fish)  # create a column of species, from the rownames of species.scores
+head(species.scores.fish)  #look at the data
+
+
+#get convex hulls for polygons
+hull_nr2015<-fish_island_nmds[fish_island_nmds$Treat_Year == "No_rats_2015", ][chull(fish_island_nmds[fish_island_nmds$Treat_Year == "No_rats_2015", ]$NMDS1, fish_island_nmds[fish_island_nmds$Treat_Year == "No_rats_2015", ]$NMDS2), ] 
+hull_nr2018<-fish_island_nmds[fish_island_nmds$Treat_Year == "No_rats_2018", ][chull(fish_island_nmds[fish_island_nmds$Treat_Year == "No_rats_2018", ]$NMDS1, fish_island_nmds[fish_island_nmds$Treat_Year == "No_rats_2018", ]$NMDS2), ] 
+hull_r2018<-fish_island_nmds[fish_island_nmds$Treat_Year == "Rats_2018", ][chull(fish_island_nmds[fish_island_nmds$Treat_Year == "Rats_2018", ]$NMDS1, fish_island_nmds[fish_island_nmds$Treat_Year == "Rats_2018", ]$NMDS2), ] 
+hull_r2015<-fish_island_nmds[fish_island_nmds$Treat_Year == "Rats_2015", ][chull(fish_island_nmds[fish_island_nmds$Treat_Year == "Rats_2015", ]$NMDS1, fish_island_nmds[fish_island_nmds$Treat_Year == "Rats_2015", ]$NMDS2), ] 
+hull.data.fish <- rbind(hull_r2015, hull_nr2015,  hull_r2018,hull_nr2018 )  #combine grp.a and grp.b
+hull.data.fish
+
+#get centroids
+ord.fit
+
+nmds_f<-
+  ggplot() + 
+ geom_polygon(data=hull.data.fish[hull.data.fish$Treatment=="Rats",],aes(x=NMDS1,y=NMDS2,fill=Treatment,group=Treat_Year), colour = 'black', alpha = 0.15) + # add the convex hulls - two steps because the blue is fainter
+   geom_polygon(data=hull.data.fish[hull.data.fish$Treatment=="No_rats",],aes(x=NMDS1,y=NMDS2,fill=Treatment,group=Treat_Year), colour = 'black', alpha = 0.2) + # add the convex hulls - two steps because the blue is fainter
+  geom_text(data=species.scores.fish,aes(x=NMDS1,y=NMDS2,label=species)) +  # add the species labels
+  geom_point(data=fish_island_nmds,aes(x=NMDS1,y=NMDS2,shape=Year,colour=Treatment, fill = Treatment), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                           labels=c("Seabirds", "Rats") ) +
+    geom_segment(aes(x = 0.1291, y = -0.0112, xend = -0.0529, yend = 0.1019), colour = "#56B4E9", size = 1.2, arrow =   arrow(length = unit(0.2, "inches")))+ #norats
+  geom_segment(aes(x = 0.0877, y = 0.0087, xend = -0.2072, yend = -0.0990), colour = "#e41a1c", size = 1.2, arrow =   arrow(length = unit(0.2, "inches")))+ #rats
+  scale_x_continuous(limits = c(-0.42, 0.41), breaks = seq(-0.4, 0.4, 0.2)) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none")
+
+
+##Make a plot of dispersion means +/- SE
+mod_fish.out #from betadisper, above
+#create new columns for Treament and year
+mod_fish.out$Treatment<-c("No_rats","No_rats","Rats", "Rats")
+mod_fish.out$Year<-c("2015","2018","2015", "2018")
+mod_fish.out
+
+fishd<-ggplot(mod_fish.out, aes(x=Year, y=mod_fish.mean, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(mod_fish.mean-mod_fish.se), ymax=(mod_fish.mean+mod_fish.se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("(b) Fish") +
+  theme_bw() + 
+    theme(#axis.text.y = element_blank(), #remove y-axis labels
+  panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        scale_y_continuous(name = "Dispersion", limits = c(0,0.2), breaks=seq(0,0.2,0.05)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching"))  
+
+fishd
+
+#arrange and save (combined with benthos plots from benthic_analysis.Rmd)
+#show plots
+grid.arrange(nmds_b, nmds_f, nrow = 2) 
+g <- arrangeGrob(nmds_b, nmds_f, nrow = 2) #generates g
+#ggsave("filename.eps", g, units="mm", width=180, height=180, dpi=1200)
+
+```
+
+
+
+#LMMs for individual groups
+```{r}
+library(lme4) #lmms
+
+#look at data
+fish_fg_trans_meta
+#change year to factor
+fish_fg_trans_meta$Year<-as.factor(fish_fg_trans_meta$Year)
+
+#run final models, log-transformed when necessary to meet assumptions
+####Herbivore 
+herb_lmer_int<-lmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+summary(herb_lmer_int)
+
+herb_lmer_add<-lmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+summary(herb_lmer_add)
+
+anova(herb_lmer_int, herb_lmer_add)
+#no sig interaction
+
+#test for sig of fixed effects
+herb_lmer_add_treat<-lmer(Sum_Biomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+
+herb_lmer_add_year<-lmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+
+#year
+anova(herb_lmer_add, herb_lmer_add_year)
+#no sig decline by year
+
+#treat
+anova(herb_lmer_add, herb_lmer_add_treat)
+#sig treatment effect
+
+#extract effect size and 95% CI
+summary(herb_lmer_add)
+confint(herb_lmer_add, method = "Wald")
+
+
+####Piscivore
+Pisc_lmer_int<-lmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+summary(Pisc_lmer_int)
+
+Pisc_lmer_add<-lmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure  +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+summary(Pisc_lmer_add)
+
+anova(Pisc_lmer_int, Pisc_lmer_add)
+#no sig interaction
+
+#test for sig of fixed effects
+pisc_lmer_add_treat<-lmer(Sum_Biomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+
+pisc_lmer_add_year<-lmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+
+#year
+anova(Pisc_lmer_add, pisc_lmer_add_year)
+#no sig decline by year
+
+#treat
+anova(Pisc_lmer_add, pisc_lmer_add_treat)
+#sig treatment effect
+
+
+#extract effect size and 95% CI
+summary(Pisc_lmer_add)
+confint(Pisc_lmer_add, method = "Wald")
+
+
+####Mixed-diet
+Mix_lmer_int<-lmer(log(Sum_Biomass+1)~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
+summary(Mix_lmer_int)
+
+Mix_lmer_add<-lmer(log(Sum_Biomass+1)~Treatment + Year+Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
+summary(Mix_lmer_add)
+
+anova(Mix_lmer_int, Mix_lmer_add)
+#no sig interaction
+
+#test for sig of fixed effects
+Mix_lmer_add_treat<-lmer(log(Sum_Biomass+1)~Year +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
+
+Mix_lmer_add_year<-lmer(log(Sum_Biomass+1)~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
+
+#year
+anova(Mix_lmer_add, Mix_lmer_add_year)
+#no sig effect of year
+
+#treat
+anova(Mix_lmer_add, Mix_lmer_add_treat)
+
+#extract effect sizes and 95% CI
+Mix_lmer_add<-lmer(log(Sum_Biomass+1)~relevel(Treatment, "Rats") + Year+Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
+summary(Mix_lmer_add)
+confint(Mix_lmer_add, method = "Wald")
+exp(fixef(Mix_lmer_add)) #back to original scale (multiplicative change)
+exp(confint(Mix_lmer_add, method = "Wald")) #back to original scale (multiplicative change)
+
+
+####Invertivore
+Invert_lmer_int<-lmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
+summary(Invert_lmer_int)
+
+Invert_lmer_add<-lmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
+summary(Invert_lmer_add)
+
+anova(Invert_lmer_int, Invert_lmer_add)
+#no significant interaction
+
+
+#test for sig of fixed effects
+Invert_lmer_add_treat<-lmer(Sum_Biomass~Year +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
+
+Invert_lmer_add_year<-lmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
+
+#year
+anova(Invert_lmer_add, Invert_lmer_add_year)
+#no sig effect of year
+
+#treat
+anova(Invert_lmer_add, Invert_lmer_add_treat)
+#ns
+
+#extract effect size and 95% CI
+summary(Invert_lmer_add)
+confint(Invert_lmer_add, method = "Wald")
+
+
+####Planktivore
+Plankt_lmer_int<-lmer(log(Sum_Biomass+1)~Treatment*Year +  Coral_cover+Structure +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+summary(Plankt_lmer_int)
+
+Plankt_lmer_add<-lmer(log(Sum_Biomass+1)~Treatment + Year+ Coral_cover+Structure +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+summary(Plankt_lmer_add)
+
+anova(Plankt_lmer_int, Plankt_lmer_add)
+#no sig interaction
+
+#test for sig of fixed effects
+Plankt_lmer_add_treat<-lmer(log(Sum_Biomass+1)~Year  +  Coral_cover+Structure +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+
+Plankt_lmer_add_year<-lmer(log(Sum_Biomass+1)~Treatment  + Coral_cover+Structure +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+
+#year
+anova(Plankt_lmer_add, Plankt_lmer_add_year)
+#very sig effect of year
+
+#treat
+anova(Plankt_lmer_add, Plankt_lmer_add_treat)
+#ns treatment effect
+
+
+#extract effect size and 95% CI
+summary(Plankt_lmer_add)
+confint(Plankt_lmer_add, method = "Wald")
+exp(fixef(Plankt_lmer_add)) #back to original scale (multiplicative change)
+exp(confint(Plankt_lmer_add, method = "Wald"))#back to original scale (multiplicative change)
+1-exp(fixef(Plankt_lmer_add)) #to get percent decline
+1-exp(confint(Plankt_lmer_add, method = "Wald")) #to get percent decline
+
+
+####Corallivore
+Corall_lmer_int<-lmer(log(Sum_Biomass+1)~Treatment*Year+Structure +Coral_cover + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+summary(Corall_lmer_int)
+
+Corall_lmer_add<-lmer(log(Sum_Biomass+1)~Treatment + Year+Structure +Coral_cover+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+summary(Corall_lmer_add)
+
+anova(Corall_lmer_int, Corall_lmer_add)
+#no sig interaction
+
+#test for sig of fixed effects
+Corall_lmer_add_treat<-lmer(log(Sum_Biomass+1)~Year +Structure +Coral_cover+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+
+Corall_lmer_add_year<-lmer(log(Sum_Biomass+1)~Treatment +Structure + Coral_cover+(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+
+#year
+anova(Corall_lmer_add, Corall_lmer_add_year)
+#year sig
+
+#treat
+anova(Corall_lmer_add, Corall_lmer_add_treat)
+#no sig treatment effect
+
+
+#extract effect size and 95% CI
+summary(Corall_lmer_add)
+confint(Corall_lmer_add, method = "Wald")
+exp(fixef(Corall_lmer_add)) #back to original scale (multiplicative change)
+exp(confint(Corall_lmer_add, method = "Wald"))#back to original scale (multiplicative change)
+1-exp(fixef(Corall_lmer_add)) #to get percent decline
+1-exp(confint(Corall_lmer_add, method = "Wald")) #to get percent decline
+#coral cover also important
+```
+
+
+##Plots of individual fish groups
+```{r, echo = FALSE}
+library(ggplot2)
+library('gridExtra') 
+
+#get means and se's
+fish_uvc_treat_sum <-ddply(fish_fg_trans_meta, c("Year","Treatment", "Function"), summarise,
+          Mean_Biomass = mean(Sum_Biomass), 
+          se = sd(Sum_Biomass)/sqrt(length(Sum_Biomass)))
+fish_uvc_treat_sum
+
+fish_uvc_treat_sum$Year<-as.factor(fish_uvc_treat_sum$Year)
+
+###plot each FG seperately, then mix together.
+a<-ggplot(fish_uvc_treat_sum[fish_uvc_treat_sum$Function=="Herbivore",], aes(x=Year, y=Mean_Biomass, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Biomass-se), ymax=(Mean_Biomass+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+    scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("Herbivore") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+          panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+                legend.position="none") +
+       scale_y_continuous(name = "Biomass (kg/ha)", limits = c(0,650), breaks=seq(0,600,200)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching"))
+
+
+b<-ggplot(fish_uvc_treat_sum[fish_uvc_treat_sum$Function=="Piscivore",], aes(x=Year, y=Mean_Biomass, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Biomass-se), ymax=(Mean_Biomass+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+        scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("Piscivore") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+          panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+       scale_y_continuous(name = "Biomass (kg/ha)",limits = c(0,165), breaks=seq(0,150,50)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching")) 
+
+
+c<-ggplot(fish_uvc_treat_sum[fish_uvc_treat_sum$Function=="Invertivore",], aes(x=Year, y=Mean_Biomass, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Biomass-se), ymax=(Mean_Biomass+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+       scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("Invertivore") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+          panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+       scale_y_continuous(name = "Biomass (kg/ha)", limits = c(0,100), breaks=seq(0,100,20)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching")) 
+
+
+d<-ggplot(fish_uvc_treat_sum[fish_uvc_treat_sum$Function=="Mixed-diet",], aes(x=Year, y=Mean_Biomass, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Biomass-se), ymax=(Mean_Biomass+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+       scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("Mixed-diet") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+          panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+         scale_y_continuous(name = "Biomass (kg/ha)", limits = c(0,50), breaks=seq(0,50,10)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching")) 
+
+
+e<-ggplot(fish_uvc_treat_sum[fish_uvc_treat_sum$Function=="Planktivore",], aes(x=Year, y=Mean_Biomass, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Biomass-se), ymax=(Mean_Biomass+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+       scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("Planktivore") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+          panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        scale_y_continuous(name = "Biomass (kg/ha)", limits = c(0,40), breaks=seq(0,40,10)) +
+      scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching"))  
+
+f<-ggplot(fish_uvc_treat_sum[fish_uvc_treat_sum$Function=="Corallivore",], aes(x=Year, y=Mean_Biomass, fill=Treatment, colour = Treatment, shape = Year, group = Treatment)) + 
+            geom_line(colour = 'black') +
+            geom_errorbar(aes(ymin=(Mean_Biomass-se), ymax=(Mean_Biomass+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black') +
+          geom_point(aes(fill=Treatment, shape = Year), position=position_dodge(width=0), stat="identity", size=5,  colour = 'black') +
+       scale_shape_manual(values=c(21,24),breaks=c("2015", "2018"),
+                            labels=c("Pre-bleaching", "Post-bleaching") ) +
+   scale_fill_manual(values=c("#56B4E9","#e41a1c"),breaks=c("No_rats", "Rats"),
+                            labels=c("Seabirds", "Rats") ) +
+  ggtitle("Corallivore") +
+  theme_bw() + 
+  theme(#axis.text.y = element_blank(), #remove y-axis labels
+          panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.position="none") +
+        scale_y_continuous(name = "Biomass (kg/ha)", limits = c(0.00,10), breaks=seq(0,10,2)) +
+        scale_x_discrete(name ="", 
+                    limits=c("2015", "2018"), labels = c("Pre-bleaching", "Post-bleaching"))
+
+#export plot
+grid.arrange(a, b, c, d, e, f, nrow = 3) 
+fish_plot <- arrangeGrob(a, b,c,d,e,f, nrow = 3) #generates plot for export
+#ggsave("filename.eps", fish_plot, units="mm", width=180, height=270, dpi=1200)
+
+
+```
+
