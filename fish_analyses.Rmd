@@ -13,7 +13,7 @@ head(uvc_fish)
 #merge uvc data with metadata
 ```{r,  include = FALSE}
 #load transect metadata to merge
-uvc_meta <- read.csv("seabird_rat_transect_metadata.csv", header=TRUE)
+uvc_meta <- read.csv("seabirds-bleaching/seabird_rat_transect_metadata.csv", header=TRUE)
 head(uvc_meta)
 
 ##merge dataframes so have transect metadata with benthic data
@@ -116,6 +116,7 @@ summary(sim)
 
 ```
 
+
 ##Extract NMDS results and plot
 ```{r}
 library(ggplot2)
@@ -210,197 +211,343 @@ g <- arrangeGrob(nmds_b, nmds_f, nrow = 2) #generates g
 
 
 
+
+
 #LMMs for individual groups
 ```{r}
 library(lme4) #lmms
-
+library(blme)
+library(ggplot2)
+library(jtools) #plot_summ
+library(MuMIn) #r.squaredGLMM
+  
 #look at data
 fish_fg_trans_meta
 #change year to factor
 fish_fg_trans_meta$Year<-as.factor(fish_fg_trans_meta$Year)
+#relevel factor
+fish_fg_trans_meta$Treatment<-relevel(fish_fg_trans_meta$Treatment, "Rats")
+
+#create column for logged biomass to make coding easier
+fish_fg_trans_meta$lbiomass<-log(fish_fg_trans_meta$Sum_Biomass+1)
 
 #run final models, log-transformed when necessary to meet assumptions
+
 ####Herbivore 
-herb_lmer_int<-lmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
-summary(herb_lmer_int)
+herb_blmer_int<-blmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+summary(herb_blmer_int)
 
-herb_lmer_add<-lmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
-summary(herb_lmer_add)
+herb_blmer_add<-blmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+summary(herb_blmer_add)
 
-anova(herb_lmer_int, herb_lmer_add)
+anova(herb_blmer_int, herb_blmer_add)
 #no sig interaction
 
 #test for sig of fixed effects
-herb_lmer_add_treat<-lmer(Sum_Biomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+herb_blmer_add_treat<-blmer(Sum_Biomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
 
-herb_lmer_add_year<-lmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+herb_blmer_add_year<-blmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
 
 #year
-anova(herb_lmer_add, herb_lmer_add_year)
+anova(herb_blmer_add, herb_blmer_add_year)
 #no sig decline by year
 
 #treat
-anova(herb_lmer_add, herb_lmer_add_treat)
+anova(herb_blmer_add, herb_blmer_add_treat)
 #sig treatment effect
 
+##test for sig of random effects
+herb_blmer_null<-blmer(Sum_Biomass~1  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Herbivore",])
+anova(herb_blmer_int, herb_blmer_null)
+
+
 #extract effect size and 95% CI
-summary(herb_lmer_add)
-confint(herb_lmer_add, method = "Wald")
+herbsumm_add<-summ(herb_blmer_add, conf.method="profile",  confint=TRUE,scale=TRUE, pvals=FALSE)
+herbsumm_add
+
+herbsumm_int<-summ(herb_blmer_int, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+herbsumm_int
+
+a<-plot_coefs(herbsumm_int, inner_ci_level=0.75, ci_levels=0.95, conf.method="profile",color.class=c("black", "black", "black"), coefs=c("Treatment:Year","Treatment","Year", "Coral_cover", "Structure"))+ 
+  ggtitle("Herbivore")+
+  xlim(c(-500, 500))+
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+a
+
+
+r.squaredGLMM(object=herb_blmer_int)
+#           R2m       R2c
+# 0.1374722 0.5896944
+
 
 
 ####Piscivore
-Pisc_lmer_int<-lmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
-summary(Pisc_lmer_int)
+Pisc_blmer_int<-blmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+summary(Pisc_blmer_int)
+plot(Pisc_blmer_int)
 
-Pisc_lmer_add<-lmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure  +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
-summary(Pisc_lmer_add)
+Pisc_blmer_add<-blmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+summary(Pisc_blmer_add)
 
-anova(Pisc_lmer_int, Pisc_lmer_add)
+anova(Pisc_blmer_int, Pisc_blmer_add)
 #no sig interaction
 
 #test for sig of fixed effects
-pisc_lmer_add_treat<-lmer(Sum_Biomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+Pisc_blmer_add_treat<-blmer(Sum_Biomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
 
-pisc_lmer_add_year<-lmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+Pisc_blmer_add_year<-blmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
 
 #year
-anova(Pisc_lmer_add, pisc_lmer_add_year)
+anova(Pisc_blmer_add, Pisc_blmer_add_year)
 #no sig decline by year
 
 #treat
-anova(Pisc_lmer_add, pisc_lmer_add_treat)
+anova(Pisc_blmer_add, Pisc_blmer_add_treat)
 #sig treatment effect
 
+##test for sig of random effects
+Pisc_blmer_null<-blmer(Sum_Biomass~1  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Piscivore",])
+anova(Pisc_blmer_int, Pisc_blmer_null)
+##ns 0.12
 
 #extract effect size and 95% CI
-summary(Pisc_lmer_add)
-confint(Pisc_lmer_add, method = "Wald")
+Piscsumm_add<-summ(Pisc_blmer_add, conf.method="profile",  confint=TRUE,  scale=TRUE,pvals=FALSE)
+Piscsumm_add
 
+Piscsumm_int<-summ(Pisc_blmer_int, conf.method="profile",  confint=TRUE,  scale=TRUE,pvals=FALSE)
+Piscsumm_int
 
-####Mixed-diet
-Mix_lmer_int<-lmer(log(Sum_Biomass+1)~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
-summary(Mix_lmer_int)
+b<-plot_coefs(Piscsumm_int, inner_ci_level=0.75, ci_levels=0.95,conf.method="profile",color.class=c("black", "black", "black"), coefs=c("Treatment:Year","Treatment","Year", "Coral_cover", "Structure"))+ 
+  ggtitle("Piscivore") +
+    xlim(c(-160, 160))+
+ theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
 
-Mix_lmer_add<-lmer(log(Sum_Biomass+1)~Treatment + Year+Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
-summary(Mix_lmer_add)
+b
 
-anova(Mix_lmer_int, Mix_lmer_add)
-#no sig interaction
+r.squaredGLMM(object=Pisc_blmer_int)
+#           R2m       R2c
+# 0.04336649 0.4488459
 
-#test for sig of fixed effects
-Mix_lmer_add_treat<-lmer(log(Sum_Biomass+1)~Year +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
-
-Mix_lmer_add_year<-lmer(log(Sum_Biomass+1)~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
-
-#year
-anova(Mix_lmer_add, Mix_lmer_add_year)
-#no sig effect of year
-
-#treat
-anova(Mix_lmer_add, Mix_lmer_add_treat)
-
-#extract effect sizes and 95% CI
-Mix_lmer_add<-lmer(log(Sum_Biomass+1)~relevel(Treatment, "Rats") + Year+Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
-summary(Mix_lmer_add)
-confint(Mix_lmer_add, method = "Wald")
-exp(fixef(Mix_lmer_add)) #back to original scale (multiplicative change)
-exp(confint(Mix_lmer_add, method = "Wald")) #back to original scale (multiplicative change)
 
 
 ####Invertivore
-Invert_lmer_int<-lmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
-summary(Invert_lmer_int)
+Invert_blmer_int<-blmer(Sum_Biomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
+summary(Invert_blmer_int)
+plot(Invert_blmer_int)
 
-Invert_lmer_add<-lmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
-summary(Invert_lmer_add)
+Invert_blmer_add<-blmer(Sum_Biomass~Treatment + Year+Coral_cover+Structure+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
+summary(Invert_blmer_add)
 
-anova(Invert_lmer_int, Invert_lmer_add)
-#no significant interaction
-
-
-#test for sig of fixed effects
-Invert_lmer_add_treat<-lmer(Sum_Biomass~Year +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
-
-Invert_lmer_add_year<-lmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
-
-#year
-anova(Invert_lmer_add, Invert_lmer_add_year)
-#no sig effect of year
-
-#treat
-anova(Invert_lmer_add, Invert_lmer_add_treat)
-#ns
-
-#extract effect size and 95% CI
-summary(Invert_lmer_add)
-confint(Invert_lmer_add, method = "Wald")
-
-
-####Planktivore
-Plankt_lmer_int<-lmer(log(Sum_Biomass+1)~Treatment*Year +  Coral_cover+Structure +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
-summary(Plankt_lmer_int)
-
-Plankt_lmer_add<-lmer(log(Sum_Biomass+1)~Treatment + Year+ Coral_cover+Structure +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
-summary(Plankt_lmer_add)
-
-anova(Plankt_lmer_int, Plankt_lmer_add)
+anova(Invert_blmer_int, Invert_blmer_add)
 #no sig interaction
 
 #test for sig of fixed effects
-Plankt_lmer_add_treat<-lmer(log(Sum_Biomass+1)~Year  +  Coral_cover+Structure +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+Invert_blmer_add_treat<-blmer(Sum_Biomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
 
-Plankt_lmer_add_year<-lmer(log(Sum_Biomass+1)~Treatment  + Coral_cover+Structure +(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+Invert_blmer_add_year<-blmer(Sum_Biomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
 
 #year
-anova(Plankt_lmer_add, Plankt_lmer_add_year)
-#very sig effect of year
+anova(Invert_blmer_add, Invert_blmer_add_year)
+#no sig decline by year
 
 #treat
-anova(Plankt_lmer_add, Plankt_lmer_add_treat)
-#ns treatment effect
+anova(Invert_blmer_add, Invert_blmer_add_treat)
+
+
+##test for sig of random effects
+Invert_blmer_null<-blmer(Sum_Biomass~1  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Invertivore",])
+anova(Invert_blmer_int, Invert_blmer_null)
 
 
 #extract effect size and 95% CI
-summary(Plankt_lmer_add)
-confint(Plankt_lmer_add, method = "Wald")
-exp(fixef(Plankt_lmer_add)) #back to original scale (multiplicative change)
-exp(confint(Plankt_lmer_add, method = "Wald"))#back to original scale (multiplicative change)
-1-exp(fixef(Plankt_lmer_add)) #to get percent decline
-1-exp(confint(Plankt_lmer_add, method = "Wald")) #to get percent decline
+Invertsumm_add<-summ(Invert_blmer_add, conf.method="profile",  confint=TRUE,  pvals=FALSE)
+Invertsumm_add
+
+Invertsumm_int<-summ(Invert_blmer_int, conf.method="profile",  confint=TRUE, scale=TRUE, pvals=FALSE)
+Invertsumm_int
+
+c<-plot_coefs(Invertsumm_int, inner_ci_level=0.75, ci_levels=0.95, conf.method="profile", color.class=c("black", "black", "black"), coefs=c("Treatment:Year","Treatment","Year", "Coral_cover", "Structure"))+ 
+  ggtitle("Invertivore") + 
+  xlim(c(-100, 100))+
+ theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+c
 
 
-####Corallivore
-Corall_lmer_int<-lmer(log(Sum_Biomass+1)~Treatment*Year+Structure +Coral_cover + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
-summary(Corall_lmer_int)
+r.squaredGLMM(object=Invert_blmer_int)
+#           R2m       R2c
+# 0.06964612 0.3071322
 
-Corall_lmer_add<-lmer(log(Sum_Biomass+1)~Treatment + Year+Structure +Coral_cover+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
-summary(Corall_lmer_add)
 
-anova(Corall_lmer_int, Corall_lmer_add)
+
+####Mixed-diet 
+Mix_blmer_int<-blmer(lbiomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
+summary(Mix_blmer_int)
+plot(Mix_blmer_int) #outliers, but not terrible without log........
+
+Mix_blmer_add<-blmer(lbiomass~Treatment + Year+Coral_cover+Structure+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
+summary(Mix_blmer_add)
+
+anova(Mix_blmer_int, Mix_blmer_add)
 #no sig interaction
 
 #test for sig of fixed effects
-Corall_lmer_add_treat<-lmer(log(Sum_Biomass+1)~Year +Structure +Coral_cover+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+Mix_blmer_add_treat<-blmer(lbiomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
 
-Corall_lmer_add_year<-lmer(log(Sum_Biomass+1)~Treatment +Structure + Coral_cover+(1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+Mix_blmer_add_year<-blmer(lbiomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
 
 #year
-anova(Corall_lmer_add, Corall_lmer_add_year)
-#year sig
+anova(Mix_blmer_add, Mix_blmer_add_year)
+#no sig decline by year
 
 #treat
-anova(Corall_lmer_add, Corall_lmer_add_treat)
+anova(Mix_blmer_add, Mix_blmer_add_treat)
 #no sig treatment effect
 
 
+##test for sig of random effects
+Mix_blmer_null<-blmer(lbiomass~1  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Mixed-diet",])
+anova(Mix_blmer_int, Mix_blmer_null)
+##not sig 
+
 #extract effect size and 95% CI
-summary(Corall_lmer_add)
-confint(Corall_lmer_add, method = "Wald")
-exp(fixef(Corall_lmer_add)) #back to original scale (multiplicative change)
-exp(confint(Corall_lmer_add, method = "Wald"))#back to original scale (multiplicative change)
-1-exp(fixef(Corall_lmer_add)) #to get percent decline
-1-exp(confint(Corall_lmer_add, method = "Wald")) #to get percent decline
-#coral cover also important
+Mixsumm_add<-summ(Mix_blmer_add, conf.method="profile",  confint=TRUE,  pvals=FALSE)
+Mixsumm_add
+
+Mixsumm_int<-summ(Mix_blmer_int, conf.method="profile",  confint=TRUE, scale=TRUE, pvals=FALSE)
+Mixsumm_int
+
+d<-plot_coefs(Mixsumm_int, inner_ci_level=0.75, ci_levels=0.95, exp=TRUE, conf.method="profile", color.class=c("black", "black", "black"), coefs=c("Treatment:Year","Treatment","Year", "Coral_cover", "Structure"))+ 
+  ggtitle("Mixed-diet")+
+# xlim(c(-100, 100))+
+ theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+
+d
+
+r.squaredGLMM(object=Mix_blmer_int)
+#           R2m       R2c
+# 0.04246732 0.8084706
+
+
+
+
+####Planktivore 
+Plankt_blmer_int<-blmer(lbiomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+summary(Plankt_blmer_int)
+plot(Plankt_blmer_int)
+
+Plankt_blmer_add<-blmer(lbiomass~Treatment + Year+Coral_cover+Structure+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+summary(Plankt_blmer_add)
+
+anova(Plankt_blmer_int, Plankt_blmer_add)
+#no sig interaction
+
+#test for sig of fixed effects
+Plankt_blmer_add_treat<-blmer(lbiomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+
+Plankt_blmer_add_year<-blmer(lbiomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+
+#year
+anova(Plankt_blmer_add, Plankt_blmer_add_year)
+#sig decline by year
+
+#treat
+anova(Plankt_blmer_add, Plankt_blmer_add_treat)
+#marginally sig treatment effect
+
+
+##test for sig of random effects
+Plankt_blmer_null<-blmer(lbiomass~1  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Planktivore",])
+anova(Plankt_blmer_int, Plankt_blmer_null)
+
+
+#extract effect size and 95% CI
+Planktsumm_add<-summ(Plankt_blmer_add, conf.method="profile",  confint=TRUE,  pvals=FALSE)
+Planktsumm_add
+
+Planktsumm_int<-summ(Plankt_blmer_int, conf.method="profile",  confint=TRUE, scale=TRUE, pvals=FALSE)
+Planktsumm_int
+
+e<-plot_coefs(Planktsumm_int, inner_ci_level=0.75, ci_levels=0.95, exp=TRUE, conf.method="profile", color.class=c("black", "black", "black"), coefs=c("Treatment:Year","Treatment","Year", "Coral_cover", "Structure"))+ 
+  ggtitle("Planktivore") +
+theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+
+e
+
+
+r.squaredGLMM(object=Plankt_blmer_int)
+#           R2m       R2c
+# 0.03632118 0.7828376
+
+
+
+
+####Corallivore 
+Corall_blmer_int<-blmer(lbiomass~Treatment*Year+Coral_cover+Structure  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+summary(Corall_blmer_int)
+plot(Corall_blmer_int)
+
+Corall_blmer_add<-blmer(lbiomass~Treatment + Year+Coral_cover+Structure+ (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+summary(Corall_blmer_add)
+
+anova(Corall_blmer_int, Corall_blmer_add)
+#no sig interaction
+
+#test for sig of fixed effects
+Corall_blmer_add_treat<-blmer(lbiomass~Year +Coral_cover+Structure +  (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+
+Corall_blmer_add_year<-blmer(lbiomass~Treatment +Coral_cover+Structure + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+
+#year
+anova(Corall_blmer_add, Corall_blmer_add_year)
+#SIGNIFICANT
+
+#treat
+anova(Corall_blmer_add, Corall_blmer_add_treat)
+#ns
+
+
+##test for sig of random effects
+Corall_blmer_null<-blmer(lbiomass~1  + (1|Atoll/Island),  data=fish_fg_trans_meta[fish_fg_trans_meta$Function=="Corallivore",])
+anova(Corall_blmer_int, Corall_blmer_null)
+##very sig
+
+#extract effect size and 95% CI
+Corallsumm_add<-summ(Corall_blmer_add, conf.method="profile",  confint=TRUE,  pvals=FALSE)
+Corallsumm_add
+
+Corallsumm_int<-summ(Corall_blmer_int, conf.method="profile",  confint=TRUE, scale=TRUE, pvals=FALSE)
+Corallsumm_int
+
+f<-plot_coefs(Corallsumm_int, inner_ci_level=0.75, ci_levels=0.95,exp=TRUE, conf.method="profile", color.class=c("black", "black", "black"), coefs=c("Treatment:Year","Treatment","Year", "Coral_cover", "Structure"))+ 
+  ggtitle("Corallivore") +
+theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+
+f
+
+
+
+r.squaredGLMM(object=Corall_blmer_int)
+#           R2m       R2c
+# 0.05262509 0.8293092
+```
+
+
+##bring effect size plots together
+```{r}
+
+library(gridExtra)
+
+f1<-grid.arrange(a,b,c,d,e,f, nrow=3)
+
+#ggsave("fish_effect_sizes.eps", f1, units="mm", width=180, height=180, dpi=1200)
+
+
 ```
 
 
@@ -558,7 +705,6 @@ f<-ggplot(fish_uvc_treat_sum[fish_uvc_treat_sum$Function=="Corallivore",], aes(x
 grid.arrange(a, b, c, d, e, f, nrow = 3) 
 fish_plot <- arrangeGrob(a, b,c,d,e,f, nrow = 3) #generates plot for export
 #ggsave("filename.eps", fish_plot, units="mm", width=180, height=270, dpi=1200)
-
 
 ```
 

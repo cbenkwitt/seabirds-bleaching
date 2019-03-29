@@ -3,7 +3,6 @@
 
 ##Benthos
 
-
 ##load data
 ```{r, include = FALSE}
 #load data
@@ -131,6 +130,11 @@ mod_benth.out
 sim_benth<-simper(benthic_island_wide[6:ncol(benthic_island_wide)], benthic_island_wide$Treat_Year, permutations = 999)
 summary(sim_benth)
 
+
+##SIMPER analysis to test effects of species on atoll
+sim_benth2<-simper(benthic_island_wide[6:ncol(benthic_island_wide)], benthic_island_wide$Atoll, permutations = 999)
+summary(sim_benth2)
+
 ```
 
 ##Extract NMDS results and plot
@@ -228,118 +232,255 @@ bend
 
 #LMMs for individual groups
 ```{r}
-library(lme4) #glmms
+library(lme4) #lmms
+library(blme)
+library(ggplot2)
+library(jtools) #plot_summ
+library(MuMIn) #r.squaredGLMM
 
 #look at data
 benthic_trans_group_meta
 
 #change year to factor
 benthic_trans_group_meta$Year<-as.factor(benthic_trans_group_meta$Year)
+#relevel factor
+benthic_trans_group_meta$Treatment<-relevel(benthic_trans_group_meta$Treatment, "Rats")
+#create column for logged biomass to make coding easier
+benthic_trans_group_meta$lpercent<-log(benthic_trans_group_meta$Percent+1)
 
 #run final models, log-transformed when necessary to meet assumptions
+
 #hard coral
-coral_lmer_1_int<-lmer(Percent~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
-summary(coral_lmer_1_int)
+coral_blmer_int<-blmer(Percent~Treatment*Year  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
+summary(coral_blmer_int)
 
-coral_lmer_1_add<-lmer(Percent~Treatment+Year + (1|Atoll/Island),  data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
-summary(coral_lmer_1_add)
+coral_blmer_add<-blmer(Percent~Treatment + Year+ (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
+summary(coral_blmer_add)
 
-#LRT
-anova(coral_lmer_1_int, coral_lmer_1_add)
+anova(coral_blmer_int, coral_blmer_add)
 #no sig interaction
 
-#test for significance of each fixed effect with LRT's
-coral_lmer_1_yr<-lmer(Percent~Treatment + (1|Atoll/Island),  data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
-coral_lmer_1_treat<-lmer(Percent~Year + (1|Atoll/Island),  data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
+#test for sig of fixed effects
+coral_blmer_add_treat<-blmer(Percent~Year  +  (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
 
-anova(coral_lmer_1_add, coral_lmer_1_yr)
-#very significant effect of year
+coral_blmer_add_year<-blmer(Percent~Treatment  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
 
-anova(coral_lmer_1_add, coral_lmer_1_treat)
-#no significant effect of treatment
+#year
+anova(coral_blmer_add, coral_blmer_add_year)
+#very sig decline by year
+
+#treat
+anova(coral_blmer_add, coral_blmer_add_treat)
+#ns treatment effect
+
+##test for sig of random effects
+coral_blmer_null<-blmer(Percent~1  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Hard_Coral",])
+anova(coral_blmer_int, coral_blmer_null)
+##fixed effects very important
 
 #extract effect size and 95% CI
-summary(coral_lmer_1_add)
-confint(coral_lmer_1_add, method = "Wald")
+coralsumm_add<-summ(coral_blmer_add, conf.method="profile",  confint=TRUE,scale=TRUE, pvals=FALSE)
+coralsumm_add
+
+coralsumm_int<-summ(coral_blmer_int, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+coralsumm_int
+
+a<-plot_coefs(coralsumm_int, inner_ci_level=0.75, ci_levels=0.95, color.class=c("black", "black", "black"), conf.method="profile", coefs=c("Treatment:Year","Treatment","Year"))+ 
+  ggtitle("Hard coral")+
+  xlim(c(-16, 16))+
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+a
 
 
-#Halimeda
-algae_lmer_int<-lmer(log(Percent + 1)~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
-summary(algae_lmer_int)
+r.squaredGLMM(object=coral_blmer_int)
+#           R2m       R2c
+# 0.09269879 0.6959157
 
-algae_lmer_add<-lmer(log(Percent + 1)~Treatment+Year + (1|Atoll/Island),data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
-summary(algae_lmer_add)
 
-anova(algae_lmer_int, algae_lmer_add)
-#very significant interaction
 
-#extract effects and back-transform to original scale
-algae_lmer_int<-lmer(log(Percent + 1)~relevel(Treatment, "Rats")*relevel(Year, "2018") + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
-summary(algae_lmer_int)
-confint(algae_lmer_int, method = "Wald")
-exp(fixef(algae_lmer_int)) #back to original scale (multiplicative change)
-exp(confint(algae_lmer_int, method = "Wald"))#back to original scale (multiplicative change)
+#halimeda
+halimeda_blmer_int<-blmer(lpercent~Treatment*Year  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
+summary(halimeda_blmer_int)
+
+halimeda_blmer_add<-blmer(lpercent~Treatment + Year+ (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
+summary(halimeda_blmer_add)
+
+anova(halimeda_blmer_int, halimeda_blmer_add)
+#very sig interaction
+
+#test for sig of fixed effects
+halimeda_blmer_add_treat<-blmer(lpercent~Year  +  (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
+
+halimeda_blmer_add_year<-blmer(lpercent~Treatment  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
+
+#year
+anova(halimeda_blmer_add, halimeda_blmer_add_year)
+#very sig decline by year
+
+#treat
+anova(halimeda_blmer_add, halimeda_blmer_add_treat)
+#ns treatment effect
+
+##test for sig of random effects
+halimeda_blmer_null<-blmer(lpercent~1  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Halimeda",])
+anova(halimeda_blmer_int, halimeda_blmer_null)
+##fixed effects very important
+
+#extract effect size and 95% CI
+halimedasumm_int<-summ(halimeda_blmer_int, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+halimedasumm_int
+
+b<-plot_coefs(halimedasumm_int, inner_ci_level=0.75, ci_levels=0.95, exp=TRUE, color.class=c("black", "black", "black"), conf.method="profile", coefs=c("Treatment:Year","Treatment","Year"))+ 
+  ggtitle("Halimeda")+
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+b
+
+
+r.squaredGLMM(object=halimeda_blmer_int)
+#           R2m       R2c
+# 0.06684222 0.9232066
+
 
 
 #CCA
-cca_lmer_int<-lmer(log(Percent + 1)~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
-summary(cca_lmer_int)
+CCA_blmer_int<-blmer(lpercent~Treatment*Year  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
+summary(CCA_blmer_int)
 
-cca_lmer_add<-lmer(log(Percent + 1)~Treatment+Year + (1|Atoll/Island),  data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
-summary(cca_lmer_add)
+CCA_blmer_add<-blmer(lpercent~Treatment + Year+ (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
+summary(CCA_blmer_add)
 
-anova(cca_lmer_int, cca_lmer_add)
-#interaction significant
+anova(CCA_blmer_int, CCA_blmer_add)
+#very sig interaction
 
-#extract effects and back-transform
-cca_lmer_int<-lmer(log(Percent + 1)~relevel(Treatment, "No_rats")*relevel(Year, "2018") + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
-summary(cca_lmer_int)
-confint(cca_lmer_int, method = "Wald")
-exp(fixef(cca_lmer_int)) #back to original scale (multiplicative change)
-exp(confint(cca_lmer_int, method = "Wald"))#back to original scale (multiplicative change)
+#test for sig of fixed effects
+CCA_blmer_add_treat<-blmer(lpercent~Year  +  (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
+
+CCA_blmer_add_year<-blmer(lpercent~Treatment  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
+
+#year
+anova(CCA_blmer_add, CCA_blmer_add_year)
+#very sig decline by year
+
+#treat
+anova(CCA_blmer_add, CCA_blmer_add_treat)
+#ns treatment effect
+
+##test for sig of random effects
+CCA_blmer_null<-blmer(lpercent~1  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="CCA",])
+anova(CCA_blmer_int, CCA_blmer_null)
+##fixed effects very important
+
+#extract effect size and 95% CI
+CCAsumm_int<-summ(CCA_blmer_int, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+CCAsumm_int
+
+c<-plot_coefs(CCAsumm_int, inner_ci_level=0.75, ci_levels=0.95, exp=TRUE, color.class=c("black", "black", "black"), conf.method="profile", coefs=c("Treatment:Year","Treatment","Year"))+ 
+  ggtitle("CCA")+
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+c
+
+
+r.squaredGLMM(object=CCA_blmer_int)
+#           R2m       R2c
+# 0.08199697 0.9315905
+
 
 
 #Pavement
-pave_lmer_int<-lmer(Percent~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
-summary(pave_lmer_int)
+Pavement_blmer_int<-blmer(Percent~Treatment*Year  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
+summary(Pavement_blmer_int)
 
-pave_lmer_add<-lmer(Percent~Treatment+Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
-summary(pave_lmer_add)
+Pavement_blmer_add<-blmer(Percent~Treatment + Year+ (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
+summary(Pavement_blmer_add)
 
-anova(pave_lmer_int, pave_lmer_add)
-#very significant year*treatment interaction
+anova(Pavement_blmer_int, Pavement_blmer_add)
+#very sig interaction
 
-#extract effects
-pave_lmer_int<-lmer(Percent~relevel(Treatment, "Rats")*relevel(Year, "2018") + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
+#test for sig of fixed effects
+Pavement_blmer_add_treat<-blmer(Percent~Year  +  (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
 
-summary(pave_lmer_int)
-confint(pave_lmer_int, method = "Wald")#year
+Pavement_blmer_add_year<-blmer(Percent~Treatment  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
+
+#year
+anova(Pavement_blmer_add, Pavement_blmer_add_year)
+
+#treat
+anova(Pavement_blmer_add, Pavement_blmer_add_treat)
+
+
+##test for sig of random effects
+Pavement_blmer_null<-blmer(Percent~1  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Pavement",])
+anova(Pavement_blmer_int, Pavement_blmer_null)
+##fixed effects very important
+
+
+#extract effect size and 95% CI
+Pavementsumm_int<-summ(Pavement_blmer_int, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+Pavementsumm_int
+
+d<-plot_coefs(Pavementsumm_int, inner_ci_level=0.75, ci_levels=0.95, color.class=c("black", "black", "black"), conf.method="profile", coefs=c("Treatment:Year","Treatment","Year"))+ 
+  ggtitle("Pavement")+
+  xlim(c(-36, 36))+
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+d
+
+
+r.squaredGLMM(object=Pavement_blmer_int)
+#           R2m       R2c
+# 0.2786702 0.6973881
+
 
 
 #Rubble
-rub_lmer_int<-lmer(log(Percent + 1)~Treatment*Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
-summary(rub_lmer_int)
+Rubble_blmer_int<-blmer(lpercent~Treatment*Year  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+summary(Rubble_blmer_int)
 
-rub_lmer_add<-lmer(log(Percent + 1)~Treatment+Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
-summary(rub_lmer_add)
+Rubble_blmer_add<-blmer(lpercent~Treatment + Year+ (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+summary(Rubble_blmer_add)
 
-anova(rub_lmer_int, rub_lmer_add)
-#no significant interaction
+anova(Rubble_blmer_int, Rubble_blmer_add)
+#no sig interaction
 
-rub_lmer_yr<-lmer(log(Percent + 1)~Treatment + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+#test for sig of fixed effects
+Rubble_blmer_add_treat<-blmer(lpercent~Year  +  (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
 
-rub_lmer_treat<-lmer(log(Percent + 1)~Year + (1|Atoll/Island), data = benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+Rubble_blmer_add_year<-blmer(lpercent~Treatment  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+
+#year
+anova(Rubble_blmer_add, Rubble_blmer_add_year)
+#ns
+
+#treat
+anova(Rubble_blmer_add, Rubble_blmer_add_treat)
+#ns treatment effect
+
+##test for sig of random effects
+Rubble_blmer_null<-blmer(lpercent~1  + (1|Atoll/Island),  data=benthic_trans_group_meta[benthic_trans_group_meta$Group=="Rubble",])
+anova(Rubble_blmer_int, Rubble_blmer_null)
+##fixed effects not sig
+
+#extract effect size and 95% CI
+Rubblesumm_add<-summ(Rubble_blmer_add, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+Rubblesumm_add
+
+Rubblesumm_int<-summ(Rubble_blmer_int, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+Rubblesumm_int
+
+e<-plot_coefs(Rubblesumm_int, inner_ci_level=0.75, ci_levels=0.95, exp=TRUE, color.class=c("black", "black", "black"), conf.method="profile", coefs=c("Treatment:Year","Treatment","Year"))+ 
+  ggtitle("Rubble")+
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines
+e
 
 
-anova(rub_lmer_add, rub_lmer_yr)
-anova(rub_lmer_add, rub_lmer_treat)
-#neither year nor treatment significant
+r.squaredGLMM(object=Rubble_blmer_int)
+#           R2m       R2c
+# 0.01292026 0.8420805
 
-#extract effects
-summary(rub_lmer_add)
-confint(rub_lmer_add, method = "Wald")
-exp(fixef(rub_lmer_add)) #back to original scale (multiplicative change)
-exp(confint(rub_lmer_add, method = "Wald"))#back to original scale (multiplicative change)
 
 ```
 
@@ -362,29 +503,67 @@ structure_treat <-ddply(uvc_meta, c("Year","Treatment"), summarise,
 structure_treat
 #looks similar across groups
 
-#Run a model
-sc_lmer_int<-lmer(Structure~Treatment*Year + (1|Atoll/Island), data = uvc_meta)
-summary(sc_lmer_int)
+#relevel factor to match other models
+uvc_meta$Treatment<-relevel(uvc_meta$Treatment, "Rats")
 
-sc_lmer_add<-lmer(Structure~Treatment+Year + (1|Atoll/Island), data = uvc_meta)
-summary(sc_lmer_add)
+##Run a model
+sc_blmer_int<-blmer(Structure~Treatment*Year  + (1|Atoll/Island),  data=uvc_meta)
+summary(sc_blmer_int)
 
-anova(sc_lmer_int, sc_lmer_add)
-#no significant interaction
+sc_blmer_add<-blmer(Structure~Treatment + Year+ (1|Atoll/Island),  data=uvc_meta)
+summary(sc_blmer_add)
 
-sc_lmer_treat<-lmer(Structure~Year + (1|Atoll/Island), data = uvc_meta)
-sc_lmer_yr<-lmer(Structure~Treatment + (1|Atoll/Island), data = uvc_meta)
+anova(sc_blmer_int, sc_blmer_add)
+#no sig interaction
 
-anova(sc_lmer_add, sc_lmer_treat)
-anova(sc_lmer_add, sc_lmer_yr)
-#neither year nor treatment significant
+#test for sig of fixed effects
+sc_blmer_add_treat<-blmer(Structure~Year  +  (1|Atoll/Island),  data=uvc_meta)
 
+sc_blmer_add_year<-blmer(Structure~Treatment  + (1|Atoll/Island),  data=uvc_meta)
 
-#extract effects
-sc_lmer_int<-lmer(Structure~relevel(Treatment, "No_rats")*relevel(Year, "2018") + (1|Atoll/Island), data = uvc_meta)
-summary(sc_lmer_int)
-confint(sc_lmer_int, method = "Wald")
+#year
+anova(sc_blmer_add, sc_blmer_add_year)
+#ns
+
+#treat
+anova(sc_blmer_add, sc_blmer_add_treat)
+#ns treatment effect
+
+##test for sig of random effects
+sc_blmer_null<-blmer(Structure~1  + (1|Atoll/Island),  data=uvc_meta)
+anova(sc_blmer_int, sc_blmer_null)
+##fixed effects not important
+
+#extract effect size and 95% CI
+scsumm_add<-summ(sc_blmer_add, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+scsumm_add
+
+scsumm_int<-summ(sc_blmer_int, conf.method="profile",  confint=TRUE,scale=TRUE,  pvals=FALSE)
+scsumm_int
+
+f<-plot_coefs(scsumm_int, inner_ci_level=0.75, ci_levels=0.95,conf.method="profile", coefs=c("Treatment:Year","Treatment","Year"), color.class=c("black", "black", "black"),  point.size = 3)+ 
+  ggtitle("Structural complexity")+
+  xlim(c(-1.2,1.2))+
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank()) #remove gridlines 
+f
+
+r.squaredGLMM(object=sc_blmer_int)
+#           R2m       R2c
+#0.01302966 0.8172735
+
 ```
+
+##combine plots
+```{r}
+library(gridExtra)
+
+b1<-arrangeGrob(a,c,b, d,e,f, nrow=3)
+
+#ggsave("benthos_effect_sizes.eps", b1, units="mm", width=180, height=180, dpi=1200)
+
+```
+
 
 
 ##Plots of individual benthic groups
@@ -552,6 +731,9 @@ g <- arrangeGrob(a, b,c,d,e,f, nrow = 3) #generates g
 
 ```
 
+
+
+
 #Look at hard coral by genus
 ```{r}
 
@@ -613,4 +795,48 @@ anova(acrop_add, acrop_year)
 #extract effects
 summary(acrop_add)
 confint(acrop_add, method = "Wald")
+```
+
+
+
+##Plot coral cover by atoll
+```{r}
+library(ggplot2)
+library('gridExtra') 
+
+#just summed by transect, then averaged by treatment and year
+benthic_group2_atoll <-ddply(benthic_trans_group_meta, c("Year","Atoll", "Group"), summarise,
+          Mean_Percent = mean(Percent), 
+          sd = sd(Percent),
+          n = length(Percent),
+          se = sd(Percent)/sqrt(n))
+benthic_group2_atoll
+benthic_group2_atoll$Year<-as.factor(benthic_group2_atoll$Year)
+
+#re-order
+benthic_group2_atoll_reorder<-transform(benthic_group2_atoll,
+      Atoll=factor(Atoll,levels=c("Salomon","Peros_Banhos","Great_Chagos_Bank")))
+###plot all atolls together
+hc<-ggplot(benthic_group2_atoll_reorder[benthic_group2_atoll_reorder$Group=="Hard_Coral",], aes(x=Atoll, y=Mean_Percent, fill=Year, colour = Year, group = Year)) + 
+          geom_bar(aes(fill=Year), position=position_dodge(width=.9), stat="identity",  colour = 'black') +
+          scale_fill_manual(values=c("#00BFC4","#F8766D"),breaks=c("2015", "2018"),
+                           labels=c("Pre-bleaching", "Post-bleaching") ) +
+          geom_errorbar(aes(ymin=(Mean_Percent-se), ymax=(Mean_Percent+se)),
+               width=.2,                    # Width of the error bars
+                colour = 'black',  position=position_dodge(.9)) +
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), # remove gridlines
+        panel.grid.minor = element_blank(), #remove gridlines
+        strip.background = element_blank(), #remove gray boxes
+        text = element_text(size=20),
+        legend.title = element_blank(), #remove legend title
+        #legend.box.background = element_rect(colour = "black", fill='white', linetype='solid', size=1), 
+        legend.justification=c(1,.9), legend.position=c(.8,.8)) + #  fix legend
+        scale_y_continuous(name = "Percent cover", expand =c(0,0),limits = c(0,55), breaks=seq(0,50,10)) +
+         scale_x_discrete(name ="", 
+                    limits=c("Salomon", "Peros_Banhos", "Great_Chagos_Bank"), labels = c("Salomon", "Peros Banhos", 
+                                                                                         "Great Chagos Bank")) 
+hc
+#ggsave("coral_atoll.eps", hc, units="mm", width=180, height=180, dpi=1200)
+
 ```
