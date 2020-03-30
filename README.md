@@ -1,6 +1,6 @@
 # seabirds-bleaching
 
-R code and data accompanying Benkwitt, Wilson, and Graham "Seabird nutrient subsidies alter patterns of algal abundance and fish biomass on coral reefs following a bleaching event" Global Change Biology (In review)
+R code and data accompanying Benkwitt CE, Wilson SK, and Graham NAJ. 2019. Seabird nutrient subsidies alter patterns of algal abundance and fish biomass on coral reefs following a bleaching event. Global Change Biology 25: 2619-2632 (https://doi.org/10.1111/gcb.14643)
 
 Contains the datafiles:
 seabird_rat_benthic_data_2015_2018.csv: Percent and proportional cover of benthic organisms
