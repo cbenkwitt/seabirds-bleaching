@@ -1,5 +1,5 @@
 
-##Analyses and figures for Benkwitt, Wilson, & Graham "Seabird nutrient subsidies alter patterns of algal abundance and fish biomass on coral reefs following a bleaching event", Global Change Biology (In Review)
+##Analyses and figures for Benkwitt, Wilson, & Graham (2019) "Seabird nutrient subsidies alter patterns of algal abundance and fish biomass on coral reefs following a bleaching event" Global Change Biology 25:2619-2632.
 
 ##Fish
 
